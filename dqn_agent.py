@@ -5,16 +5,6 @@ import tensorflow as tf
 from q_networks import dqn
 
 
-# def get_learning_rate(base_lr, ):
-#     tf.train.exponential_decay(base_lr, global_step,
-#                                lr_decay_steps, lr_decay_rate,
-#                                staircase=True, name='learning_rate')
-
-
-# def get_epsilon(initial, final, steps):
-    # tf.train.polynomial_decay()
-
-
 class DQNAgent:
 
     # In this class, we will implement functions to do the following.
@@ -68,37 +58,39 @@ class DQNAgent:
         self.sess = tf.Session(config=config)
         self.writer = tf.summary.FileWriter(args.log_dir, self.sess.graph)
 
-        saver = tf.train.Saver()
-        if args.restore:
-            saver.restore(self.sess, tf.train.latest_checkpoint(args.log_dir))
-        else:
-            self.sess.run(tf.global_variables_initializer())
-        self.save_path = os.path.join(args.log_dir, 'checkpoints', 'model')
+    def evaluate(self, env_name, num_episodes, epsilon):
+        # Evaluate the performance of your agent over 100 episodes, by calculating cummulative rewards for the 100 episodes.
+        # Here you need to interact with the environment, irrespective of whether you are using a memory.
+        env = gym.make(env_name)
+        rewards = []
+        for i in range(num_episodes):
+            done = False
+            state = env.reset()
+            episode_reward = 0.
+            while not done:
+                action = self.policy(state, epsilon)
+                next_state, reward, done, info = env.step(action)
+                episode_reward += reward
+            rewards.append(episode_reward)
+        return rewards
 
-    def policy(self, q_values, epsilon=0.05):
-        best_action = np.argmax(q_values)
+    def policy(self, state, epsilon=0.05):
+        q_values = self.sess.run(self.q_pred, feed_dict={self.state: [state]})
+        best_action = np.argmax(q_values[0])
         u = np.random.uniform()
         if u > epsilon:
             return best_action
         else:
             return self.env.action_space.sample()
 
-    def evaluate(self, env, step, num_episodes, epsilon):
-        total_reward = 0.
-        for i in range(num_episodes):
-            done = False
-            state = env.reset()
-            episode_reward = 0.
-            while not done:
-                q_values = self.sess.run(self.q_pred, feed_dict={self.state: np.expand_dims(state, 0)})
-                action = self.policy(q_values[0], epsilon)
-                next_state, reward, done, info = self.env.step(action)
-                episode_reward += reward
-            total_reward += episode_reward
-        avg_reward = total_reward / num_episodes
-        summary = self.sess.run(self.reward_summary, feed_dict={self.avg_reward: avg_reward})
-        self.writer.add_summary(summary, step)
-        print('Step: %d    Average reward: %f' % (step, avg_reward))
+    def record(self, env_name, epsilon, video_dir):
+        env = gym.make(env_name)
+        env = gym.wrappers.Monitor(env, video_dir, force=True)
+        done = False
+        state = env.reset()
+        while not done:
+            action = self.policy(state, epsilon)
+            next_state, reward, done, info = env.step(action)
 
     def train(self, args):
         # In this function, we will train our network.
@@ -107,13 +99,29 @@ class DQNAgent:
 
         # If you are using a replay memory, you should interact with environment here, and store these
         # transitions to memory, while also updating your model.
+        saver = tf.train.Saver(max_to_keep=3)
+        if args.restore:
+            saver.restore(self.sess, tf.train.latest_checkpoint(args.log_dir))
+        else:
+            self.sess.run(tf.global_variables_initializer())
+        save_path = os.path.join(args.log_dir, 'checkpoints', 'model')
+
         i = 0
+        video_num = 0
+        step_per_capture = args.max_iter // 3
         state = self.env.reset()
+
+        rewards = self.evaluate(args.env_name, args.eval_episodes, args.final_epsilon)
+        summary = self.sess.run(self.reward_summary,
+                                feed_dict={self.avg_reward: np.mean(rewards)})
+        self.writer.add_summary(summary, i)
+        print('Step: %d    Average reward: %f' % (i, np.mean(rewards)))
+        self.record(args.env_name, args.final_epsilon,
+                    os.path.join(args.video_dir, str(video_num)))
+
         while i < args.max_iter:
-            i += 1
-            q_values, epsilon = self.sess.run([self.q_pred, self.epsilon],
-                                              feed_dict={self.state: [state]})
-            action = self.policy(q_values[0], epsilon)
+            epsilon = self.sess.run(self.epsilon)
+            action = self.policy(state, epsilon)
             next_state, reward, done, info = self.env.step(action)
             target_value = self.sess.run(self.target_value,
                                          feed_dict={self.reward: [reward],
@@ -123,23 +131,25 @@ class DQNAgent:
                                              feed_dict={self.state: [state],
                                                         self.target: target_value,
                                                         self.action: [action]})
+            i += 1
             self.writer.add_summary(summary, i)
             if done:
                 state = self.env.reset()
             else:
                 state = next_state
             if i % args.steps_per_eval == 0:
-                env = gym.make(args.env_name)
-                self.evaluate(env, i, args.eval_episodes, args.final_epsilon)
+                rewards = self.evaluate(args.env_name, args.eval_episodes, args.final_epsilon)
+                summary = self.sess.run(self.reward_summary,
+                                        feed_dict={self.avg_reward: np.mean(rewards)})
+                self.writer.add_summary(summary, i)
+                print('Step: %d    Average reward: %f' % (i, np.mean(rewards)))
+            if i % step_per_capture == 0:
+                video_num += 1
+                self.record(args.env_name, args.final_epsilon,
+                            os.path.join(args.video_dir, str(video_num)))
             if i % args.steps_per_save == 0:
-                saver = tf.train.Saver()
-                saver.save(self.sess, self.save_path, self.global_step)
-
-    def test(self, model_file=None):
-        # Evaluate the performance of your agent over 100 episodes, by calculating cummulative rewards for the 100 episodes.
-        # Here you need to interact with the environment, irrespective of whether you are using a memory.
-        pass
-
+                saver.save(self.sess, save_path, self.global_step)
+        saver.save(self.sess, save_path, self.global_step)
 
 class ReplayDQNAgent(DQNAgent):
     # def __init__(self, environment_name, gamma):
