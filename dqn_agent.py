@@ -91,6 +91,7 @@ class DQNAgent:
         while not done:
             action = self.policy(state, epsilon)
             next_state, reward, done, info = env.step(action)
+        env.close()
 
     def train(self, args):
         # In this function, we will train our network.
@@ -99,26 +100,27 @@ class DQNAgent:
 
         # If you are using a replay memory, you should interact with environment here, and store these
         # transitions to memory, while also updating your model.
-        saver = tf.train.Saver(max_to_keep=3)
+        saver = tf.train.Saver()
+        steps_per_save = args.max_iter // 3
+        save_path = os.path.join(args.log_dir, 'checkpoints', 'model')
         if args.restore:
             saver.restore(self.sess, tf.train.latest_checkpoint(args.log_dir))
         else:
             self.sess.run(tf.global_variables_initializer())
-        save_path = os.path.join(args.log_dir, 'checkpoints', 'model')
-
-        i = 0
-        video_num = 0
-        step_per_capture = args.max_iter // 3
-        state = self.env.reset()
 
         rewards = self.evaluate(args.env_name, args.eval_episodes, args.final_epsilon)
         summary = self.sess.run(self.reward_summary,
                                 feed_dict={self.avg_reward: np.mean(rewards)})
-        self.writer.add_summary(summary, i)
-        print('Step: %d    Average reward: %f' % (i, np.mean(rewards)))
-        self.record(args.env_name, args.final_epsilon,
-                    os.path.join(args.video_dir, str(video_num)))
+        self.writer.add_summary(summary, 0)
+        print('Step: %d    Average reward: %f' % (0, np.mean(rewards)))
 
+        video_num = 0
+        steps_per_capture = args.max_iter // 3
+        self.record(args.env_name, args.final_epsilon,
+                    os.path.join(args.video_dir, '0'))
+
+        i = 0
+        state = self.env.reset()
         while i < args.max_iter:
             epsilon = self.sess.run(self.epsilon)
             action = self.policy(state, epsilon)
@@ -143,11 +145,11 @@ class DQNAgent:
                                         feed_dict={self.avg_reward: np.mean(rewards)})
                 self.writer.add_summary(summary, i)
                 print('Step: %d    Average reward: %f' % (i, np.mean(rewards)))
-            if i % step_per_capture == 0:
+            if i % steps_per_capture == 0:
                 video_num += 1
                 self.record(args.env_name, args.final_epsilon,
                             os.path.join(args.video_dir, str(video_num)))
-            if i % args.steps_per_save == 0:
+            if i % steps_per_save == 0:
                 saver.save(self.sess, save_path, self.global_step)
         saver.save(self.sess, save_path, self.global_step)
 
