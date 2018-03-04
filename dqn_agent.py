@@ -3,6 +3,7 @@ import numpy as np
 import os
 import tensorflow as tf
 from q_networks import dqn
+from replay_memory import ReplayMemory
 
 
 class DQNAgent:
@@ -61,6 +62,9 @@ class DQNAgent:
         self.sess = tf.Session(config=config)
         self.writer = tf.summary.FileWriter(args.log_dir, self.sess.graph)
 
+        if args.replay:
+            self.replay = ReplayMemory(args.memory_size, args.burn_in, args.env_name)
+
     def evaluate(self, env_name, num_episodes, epsilon):
         # Evaluate the performance of your agent over 100 episodes, by calculating cummulative rewards for the 100 episodes.
         # Here you need to interact with the environment, irrespective of whether you are using a memory.
@@ -104,12 +108,13 @@ class DQNAgent:
         # If you are using a replay memory, you should interact with environment here, and store these
         # transitions to memory, while also updating your model.
         saver = tf.train.Saver()
-        steps_per_save = args.max_iter // 3
-        save_path = os.path.join(args.log_dir, 'checkpoints', 'model')
         if args.restore:
             saver.restore(self.sess, tf.train.latest_checkpoint(args.log_dir))
         else:
             self.sess.run(tf.global_variables_initializer())
+        save_path = os.path.join(args.log_dir, 'checkpoints', 'model')
+        steps_per_save = args.max_iter // 3
+        steps_per_capture = args.max_iter // 3
 
         rewards = self.evaluate(args.env_name, args.eval_episodes, args.final_epsilon)
         summary = self.sess.run(self.reward_summary,
@@ -118,7 +123,6 @@ class DQNAgent:
         print('Step: %d    Average reward: %f' % (0, np.mean(rewards)))
 
         video_num = 0
-        steps_per_capture = args.max_iter // 3
         self.record(args.env_name, args.final_epsilon,
                     os.path.join(args.video_dir, '0'))
 
@@ -127,18 +131,30 @@ class DQNAgent:
         while i < args.max_iter:
             epsilon = self.sess.run(self.epsilon)
             action = self.policy(state, epsilon)
-            next_state, reward, done, info = self.env.step(action)
-            target_value = self.sess.run(self.target_value,
-                                         feed_dict={self.reward: [reward],
-                                                    self.next_state: [next_state],
-                                                    self.is_terminal: [done]})
-            _, loss, summary = self.sess.run([self.train_op, self.loss, self.train_summary],
-                                             feed_dict={self.state: [state],
-                                                        self.target: target_value,
-                                                        self.action: [action]})
+            next_state, reward, is_terminal, info = self.env.step(action)
+            if args.replay:
+                self.replay.append((state, action, reward, next_state, is_terminal))
+                states, actions, rewards, next_states, is_terminals = self.replay.sample(args.batch_size)
+                target_values = self.sess.run(self.target_value,
+                                              feed_dict={self.reward: rewards,
+                                                         self.next_state: next_states,
+                                                         self.is_terminal: is_terminals})
+                _, loss, summary = self.sess.run([self.train_op, self.loss, self.train_summary],
+                                                 feed_dict={self.state: states,
+                                                            self.target: target_values,
+                                                            self.action: actions})
+            else:
+                target_value = self.sess.run(self.target_value,
+                                             feed_dict={self.reward: [reward],
+                                                        self.next_state: [next_state],
+                                                        self.is_terminal: [is_terminal]})
+                _, loss, summary = self.sess.run([self.train_op, self.loss, self.train_summary],
+                                                 feed_dict={self.state: [state],
+                                                            self.target: target_value,
+                                                            self.action: [action]})
             i += 1
             self.writer.add_summary(summary, i)
-            if done:
+            if is_terminal:
                 state = self.env.reset()
             else:
                 state = next_state
@@ -155,12 +171,3 @@ class DQNAgent:
             if i % steps_per_save == 0:
                 saver.save(self.sess, save_path, self.global_step)
         saver.save(self.sess, save_path, self.global_step)
-
-class ReplayDQNAgent(DQNAgent):
-    # def __init__(self, environment_name, gamma):
-    #     super(ReplayDQNAgent, self).__init__(environment_name, gamma)
-
-    def burn_in_memory(self):
-        # Initialize your replay memory with a burn_in number of episodes / transitions.
-
-        pass
