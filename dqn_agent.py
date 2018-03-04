@@ -32,14 +32,10 @@ class DQNAgent:
                                          name='next_state')
         self.is_terminal = tf.placeholder(tf.float32, shape=(None,), name='is_terminal')
         self.q_target = dqn(self.next_state, self.env.action_space.n)
-        self.target_value = self.reward + args.gamma * tf.reduce_max(self.q_target) * self.is_terminal
+        self.target_value = self.reward + args.gamma * tf.reduce_max(self.q_target) * (1 - self.is_terminal)
         self.target = tf.placeholder(tf.float32, shape=(None,), name='target')
         self.action = tf.placeholder(tf.int32, shape=(None,), name='action')
         self.loss = tf.reduce_mean((self.target - tf.gather(self.q_pred, self.action, axis=1)) ** 2)
-
-        self.loss_summary = tf.summary.scalar('loss', self.loss)
-        self.avg_reward = tf.placeholder(tf.float32, shape=(), name='avg_reward')
-        self.reward_summary = tf.summary.scalar('average reward', self.avg_reward)
 
         self.global_step = tf.Variable(0, trainable=False, name='global_step')
         learning_rate = tf.train.exponential_decay(args.base_lr, self.global_step,
@@ -51,6 +47,13 @@ class DQNAgent:
 
         self.epsilon = tf.train.polynomial_decay(args.init_epsilon, self.global_step,
                                                  args.epsilon_decay_steps, args.final_epsilon)
+
+        loss_summary = tf.summary.scalar('loss', self.loss)
+        lr_summary = tf.summary.scalar('learning_rate', learning_rate)
+        epsilon_summary = tf.summary.scalar('epsilon', self.epsilon)
+        self.train_summary = tf.summary.merge([loss_summary, lr_summary, epsilon_summary])
+        self.avg_reward = tf.placeholder(tf.float32, shape=(), name='avg_reward')
+        self.reward_summary = tf.summary.scalar('average reward', self.avg_reward)
 
         config = tf.ConfigProto()
         config.gpu_options.allow_growth = True
@@ -129,7 +132,7 @@ class DQNAgent:
                                          feed_dict={self.reward: [reward],
                                                     self.next_state: [next_state],
                                                     self.is_terminal: [done]})
-            _, loss, summary = self.sess.run([self.train_op, self.loss, self.loss_summary],
+            _, loss, summary = self.sess.run([self.train_op, self.loss, self.train_summary],
                                              feed_dict={self.state: [state],
                                                         self.target: target_value,
                                                         self.action: [action]})
