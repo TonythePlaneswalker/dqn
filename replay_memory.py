@@ -3,7 +3,7 @@ import numpy as np
 
 
 class ReplayMemory():
-    def __init__(self, memory_size, burn_in, env_name):
+    def __init__(self, memory_size, burn_in, env_name, policy, epsilon):
 
         # The memory essentially stores transitions recorder from the agent
         # taking actions in the environment.
@@ -19,7 +19,7 @@ class ReplayMemory():
             done = False
             state = env.reset()
             while not done and i < burn_in:
-                action = env.action_space.sample()
+                action = policy(state, epsilon)
                 next_state, reward, done, info = env.step(action)
                 self.memory.append((state, action, reward, next_state, done))
                 state = next_state
@@ -29,7 +29,7 @@ class ReplayMemory():
     def sample(self, batch_size=32):
         # This function returns a batch of randomly sampled transitions - i.e. state, action, reward, next state, terminal flag tuples.
         # You will feed this to your model to train.
-        idx = np.random.choice(len(self.memory), batch_size, replace=False)
+        idx = np.random.choice(len(self.memory), batch_size)
         return zip(*np.array(self.memory)[idx])
 
     def append(self, transition):
