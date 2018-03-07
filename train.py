@@ -4,7 +4,7 @@ from dqn_agent import DQNAgent
 
 
 def main(args):
-    if os.path.exists(args.log_dir):
+    if not args.restore and os.path.exists(args.log_dir):
         delete_key = input('%s exists. Delete? [y (or enter)/N]' % args.log_dir)
         if delete_key == 'y' or delete_key == "":
             os.system('rm -rf %s/*' % args.log_dir)
@@ -16,12 +16,13 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Deep Q Network Argument Parser')
     parser.add_argument('--env_name', type=str)
+    parser.add_argument('--model_file', type=str)
     parser.add_argument('--log_dir', type=str)
     parser.add_argument('--restore', action='store_true')
     parser.add_argument('--gamma', type=float, default=1.0)
     parser.add_argument('--base_lr', type=float, default=0.0001)
-    parser.add_argument('--lr_decay_rate', type=float, default=0.6)
-    parser.add_argument('--lr_decay_steps', type=int, default=100000)
+    parser.add_argument('--lr_decay_rate', type=float, default=0.5)
+    parser.add_argument('--lr_decay_steps', type=int, default=200000)
     parser.add_argument('--lr_clip', type=float, default=0.000001)
     parser.add_argument('--init_epsilon', type=float, default=0.5)
     parser.add_argument('--final_epsilon', type=float, default=0.05)
