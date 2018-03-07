@@ -2,7 +2,7 @@ import tensorflow as tf
 
 
 def get_model(state, num_actions, scope):
-    num_hidden = [20, 20, 20]
+    num_hidden = [30, 30, 30]
     with tf.variable_scope(scope):
         net = state
         for i, n in enumerate(num_hidden):

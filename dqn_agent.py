@@ -93,7 +93,7 @@ class DQNAgent:
 
         saver = tf.train.Saver()
         if args.restore:
-            saver.restore(self.sess, tf.train.latest_checkpoint(args.log_dir))
+            saver.restore(self.sess, tf.train.latest_checkpoint(os.path.join(args.log_dir, 'checkpoints')))
         else:
             self.sess.run(tf.global_variables_initializer())
         save_path = os.path.join(args.log_dir, 'checkpoints', 'model')
