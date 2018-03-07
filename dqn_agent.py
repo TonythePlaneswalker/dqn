@@ -30,8 +30,12 @@ class DQNAgent:
         self.action = tf.placeholder(tf.int32, shape=(None,), name='action')
         self.reward = tf.placeholder(tf.float32, shape=(None,), name='reward')
         self.is_terminal = tf.placeholder(tf.float32, shape=(None,), name='is_terminal')
-
-        target = self.reward + args.gamma * tf.reduce_max(self.q_target, axis=1) * (1 - self.is_terminal)
+        if args.env_name == 'MountainCar-v0':
+            print('here')
+            target = self.reward + args.gamma * tf.reduce_max(self.q_target, axis=1) * \
+                     tf.cast((tf.gather(self.state, 0, axis=1) < 0.5), tf.float32)
+        else:
+            target = self.reward + args.gamma * tf.reduce_max(self.q_target, axis=1) * (1 - self.is_terminal)
         self.loss = tf.reduce_mean((target - tf.diag_part(tf.gather(self.q, self.action, axis=1))) ** 2)
 
         config = tf.ConfigProto()

@@ -28,7 +28,7 @@ if __name__ == '__main__':
     parser.add_argument('--final_epsilon', type=float, default=0.05)
     parser.add_argument('--epsilon_decay_steps', type=int, default=100000)
     parser.add_argument('--max_iter', type=int, default=1000000)
-    parser.add_argument('--steps_per_eval', type=int, default=1000)
+    parser.add_argument('--steps_per_eval', type=int, default=10000)
     parser.add_argument('--eval_episodes', type=int, default=20)
     parser.add_argument('--replay', action='store_true')
     parser.add_argument('--memory_size', type=int, default=50000)
