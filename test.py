@@ -19,6 +19,7 @@ def main(args):
         while not done:
             action = agent.policy(state, args.epsilon)
             next_state, reward, done, info = env.step(action)
+            state = next_state
         env.close()
 
 

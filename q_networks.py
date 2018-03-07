@@ -4,10 +4,18 @@ import tensorflow as tf
 def dqn(state, num_actions, num_hidden, scope='dqn'):
     net = state
     with tf.variable_scope(scope):
+        # w = tf.get_variable('weights', shape=(state.get_shape()[1], num_actions), dtype=tf.float32,
+        #                     initializer=tf.initializers.random_uniform(-1, 1),
+        #                     collections=[tf.GraphKeys.TRAINABLE_VARIABLES, tf.GraphKeys.GLOBAL_VARIABLES])
+        # b = tf.get_variable('bias', shape=(num_actions,), dtype=tf.float32,
+        #                     initializer=tf.initializers.zeros(),
+        #                     collections=[tf.GraphKeys.TRAINABLE_VARIABLES, tf.GraphKeys.GLOBAL_VARIABLES])
+        # net = tf.add(tf.matmul(state, w), b)
         for i, n in enumerate(num_hidden):
             net = tf.contrib.layers.fully_connected(net, n, scope='fc%d' % i)
         net = tf.contrib.layers.fully_connected(net, num_actions,
                                                 activation_fn=None,
+                                                biases_initializer=None,
                                                 scope='fc%d' % len(num_hidden))
     return net
 

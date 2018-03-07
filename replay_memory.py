@@ -19,7 +19,7 @@ class ReplayMemory():
             done = False
             state = env.reset()
             while not done and i < burn_in:
-                action = policy(state, epsilon)
+                action = policy(state, epsilon) # env.action_space.sample()
                 next_state, reward, done, info = env.step(action)
                 self.memory.append((state, action, reward, next_state, done))
                 state = next_state

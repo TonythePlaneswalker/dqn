@@ -31,8 +31,10 @@ class DQNAgent:
         self.reward = tf.placeholder(tf.float32, shape=(None,), name='reward')
         self.is_terminal = tf.placeholder(tf.float32, shape=(None,), name='is_terminal')
         self.q_target = tf.placeholder(tf.float32, shape=(None, self.env.action_space.n), name='q_target')
+        # self.loss = tf.reduce_mean(tf.reduce_sum((self.q_target - self.q) ** 2, axis=1))
         target = self.reward + args.gamma * tf.reduce_max(self.q_target, axis=1) * (1 - self.is_terminal)
-        self.loss = tf.reduce_mean((target - tf.diag_part(tf.gather(self.q, self.action, axis=1))) ** 2)
+        self.diff = (target - tf.diag_part(tf.gather(self.q, self.action, axis=1)))
+        self.loss = tf.reduce_mean(self.diff ** 2)
 
         config = tf.ConfigProto()
         config.gpu_options.allow_growth = True
@@ -40,23 +42,24 @@ class DQNAgent:
         self.sess = tf.Session(config=config)
 
     def evaluate(self, env_name, num_episodes, epsilon):
-        # env = gym.make(env_name)
+        env = gym.make(env_name)
         rewards = np.zeros(num_episodes)
         for i in range(num_episodes):
             done = False
-            state = self.env.reset()
+            state = env.reset()
             episode_reward = 0.
             while not done:
                 action = self.policy(state, epsilon)
-                next_state, reward, done, info = self.env.step(action)
+                next_state, reward, done, info = env.step(action)
                 episode_reward += reward
+                state = next_state
             rewards[i] = episode_reward
         return rewards
 
     def policy(self, state, epsilon):
         q_values = self.sess.run(self.q, feed_dict={self.state: [state]})
         best_action = np.argmax(q_values[0])
-        u = np.random.uniform()
+        u = np.random.rand()
         if u > epsilon:
             return best_action
         else:
@@ -90,7 +93,7 @@ class DQNAgent:
         reward_summary = tf.summary.scalar('average reward', avg_reward)
         writer = tf.summary.FileWriter(args.log_dir, self.sess.graph)
 
-        trainer = tf.train.RMSPropOptimizer(learning_rate)
+        trainer = tf.train.AdamOptimizer(learning_rate)
         train_op = trainer.minimize(self.loss, global_step)
 
         saver = tf.train.Saver()
@@ -103,7 +106,7 @@ class DQNAgent:
         steps_per_save = args.max_iter // 3
 
         if args.replay:
-            replay = ReplayMemory(args.memory_size, args.burn_in, args.env_name, self.policy, args.final_epsilon)
+            replay = ReplayMemory(args.memory_size, args.burn_in, args.env_name, self.policy, args.init_epsilon)
 
         i = 0
         episode_start = i
@@ -117,12 +120,18 @@ class DQNAgent:
                 replay.append((state, action, reward, next_state, is_terminal))
                 states, actions, rewards, next_states, is_terminals = replay.sample(args.batch_size)
                 q_target = self.sess.run(self.q, feed_dict={self.state: next_states})
-                _, loss, summary = self.sess.run([train_op, self.loss, train_summary],
+                # q = self.sess.run(self.q, feed_dict={self.state: states})
+                # q_target = q.copy()
+                # q_target[range(args.batch_size), list(actions)] = \
+                #     np.array(rewards) + args.gamma * q_next.max(1) * (1 - np.array(is_terminals))
+                # print(q_target - q)
+                _, loss, diff, summary = self.sess.run([train_op, self.loss, self.diff, train_summary],
                                                  feed_dict={self.state: states,
                                                             self.action: actions,
                                                             self.reward: rewards,
                                                             self.is_terminal: is_terminals,
                                                             self.q_target: q_target})
+                # print(diff)
             else:
                 q_target = self.sess.run(self.q, feed_dict={self.state: [next_state]})
                 _, loss, summary = self.sess.run([train_op, self.loss, train_summary],
@@ -133,9 +142,9 @@ class DQNAgent:
                                                             self.q_target: q_target})
             i += 1
             writer.add_summary(summary, i)
-            avg_r_train += (reward - avg_r_train) / i
-            summary = self.sess.run(r_summary, feed_dict={avg_reward_train: avg_r_train})
-            writer.add_summary(summary, i)
+            # avg_r_train += (reward - avg_r_train) / i
+            # summary = self.sess.run(r_summary, feed_dict={avg_reward_train: avg_r_train})
+            # writer.add_summary(summary, i)
             if is_terminal:
                 state = self.env.reset()
                 summary = self.sess.run(length_summary,
@@ -152,7 +161,10 @@ class DQNAgent:
                 print('Step: %d    Average reward: %f' % (i, rewards.mean()))
                 q_values = self.sess.run(self.q, feed_dict={self.state: [state]})
                 print(q_values)
+                print(rewards)
+                print('Loss:', loss)
                 state = self.env.reset()
+                episode_start = i
             if i % steps_per_save == 0:
                 saver.save(self.sess, save_path, global_step)
         saver.save(self.sess, save_path, global_step)
