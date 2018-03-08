@@ -3,7 +3,31 @@ import importlib
 import numpy as np
 import os
 import tensorflow as tf
+from skimage import color, transform
 from replay_memory import ReplayMemory
+
+
+class AtariWrapper:
+    def __init__(self, env_name, num_frames, input_size):
+        self.env = gym.make(env_name)
+        self.action_space = self.env.action_space
+        self.input_size = input_size
+        self.num_frames = num_frames
+        self.frames = []
+
+    def step(self, action):
+        frame, reward, done, info = self.env.step(action)
+        self.frames = self.frames[1:] + [color.rgb2gray(transform.resize(frame, self.input_size))]
+        next_state = np.stack(self.frames, axis=2)
+        return next_state, reward, done, info
+
+    def reset(self):
+        state = self.env.reset()
+        self.frames = [color.rgb2gray(transform.resize(state, self.input_size))]
+        for j in range(self.num_frames - 1):
+            state, reward, done, info = self.env.step(self.env.action_space.sample())
+            self.frames.append(color.rgb2gray(transform.resize(state, self.input_size)))
+        return np.stack(self.frames, axis=2)
 
 
 class DQNAgent:
@@ -21,21 +45,36 @@ class DQNAgent:
         # Create an instance of the network itself, as well as the memory.
         # Here is also a good place to set environmental parameters,
         # as well as training parameters - number of episodes / iterations, etc.
-        self.env = gym.make(args.env_name)
-        self.state = tf.placeholder(tf.float32, shape=(None,) + self.env.observation_space.shape, name='state')
+        if args.env_name == 'SpaceInvaders-v0':
+            self.env = AtariWrapper(args.env_name, args.num_frames, (args.width, args.height))
+            self.state = tf.placeholder(tf.float32,
+                                        shape=(None, args.width, args.height, args.num_frames),
+                                        name='state')
+        else:
+            self.env = gym.make(args.env_name)
+            self.state = tf.placeholder(tf.float32,
+                                        shape=(None,) + self.env.observation_space.shape,
+                                        name='state')
+
         model = importlib.import_module(args.model_file)
         self.q = model.get_model(self.state, self.env.action_space.n, scope='q_net')
-
-        self.q_target = tf.placeholder(tf.float32, shape=(None, self.env.action_space.n), name='q_target')
+        if args.double_q:
+            self.next_state = tf.placeholder(tf.float32, shape=self.state.get_shape(), name='next_state')
+            self.q_target = model.get_model(self.next_state, self.env.action_space.n, scope='q_target')
+            self.update_q_target = [tf.assign(w_target, w) for w_target, w in zip(
+                tf.trainable_variables(scope='q_target'),
+                tf.trainable_variables(scope='q_net'))]
+        else:
+            self.q_target = tf.placeholder(tf.float32, shape=(None, self.env.action_space.n), name='q_target')
         self.action = tf.placeholder(tf.int32, shape=(None,), name='action')
         self.reward = tf.placeholder(tf.float32, shape=(None,), name='reward')
         self.is_terminal = tf.placeholder(tf.float32, shape=(None,), name='is_terminal')
-        if args.env_name == 'MountainCar-v0':
-            print('here')
-            target = self.reward + args.gamma * tf.reduce_max(self.q_target, axis=1) * \
-                     tf.cast((tf.gather(self.state, 0, axis=1) < 0.5), tf.float32)
-        else:
-            target = self.reward + args.gamma * tf.reduce_max(self.q_target, axis=1) * (1 - self.is_terminal)
+        # if args.env_name == 'MountainCar-v0':
+        #     print('here')
+        #     target = self.reward + args.gamma * tf.reduce_max(self.q_target, axis=1) * \
+        #              tf.cast((tf.gather(self.state, 0, axis=1) < 0.5), tf.float32)
+        # else:
+        target = self.reward + args.gamma * tf.reduce_max(self.q_target, axis=1) * (1 - self.is_terminal)
         self.loss = tf.reduce_mean((target - tf.diag_part(tf.gather(self.q, self.action, axis=1))) ** 2)
 
         config = tf.ConfigProto()
@@ -43,16 +82,15 @@ class DQNAgent:
         config.allow_soft_placement = True
         self.sess = tf.Session(config=config)
 
-    def evaluate(self, env_name, num_episodes, epsilon):
-        env = gym.make(env_name)
+    def evaluate(self, num_episodes, epsilon):
         rewards = np.zeros(num_episodes)
         for i in range(num_episodes):
             done = False
-            state = env.reset()
+            state = self.env.reset()
             episode_reward = 0
             while not done:
                 action = self.policy(state, epsilon)
-                next_state, reward, done, info = env.step(action)
+                next_state, reward, done, info = self.env.step(action)
                 episode_reward += reward
                 state = next_state
             rewards[i] = episode_reward
@@ -93,7 +131,8 @@ class DQNAgent:
         reward_summary = tf.summary.scalar('average reward', avg_reward)
 
         trainer = tf.train.AdamOptimizer(learning_rate)
-        train_op = trainer.minimize(self.loss, global_step)
+        train_op = trainer.minimize(self.loss, global_step,
+                                    var_list=tf.trainable_variables(scope='q_net'))
 
         saver = tf.train.Saver()
         if args.restore:
@@ -105,7 +144,17 @@ class DQNAgent:
         steps_per_save = args.max_iter // 3
 
         if args.replay:
-            replay = ReplayMemory(args.memory_size, args.burn_in, args.env_name, self.policy, args.init_epsilon)
+            replay = ReplayMemory(args.memory_size)
+            i = 0
+            while i < args.burn_in:
+                done = False
+                state = self.env.reset()
+                while not done and i < args.burn_in:
+                    action = self.policy(state, args.init_epsilon)
+                    next_state, reward, done, info = self.env.step(action)
+                    replay.append((state, action, reward, next_state, done))
+                    state = next_state
+                    i += 1
 
         i = 0
         episode_start = i
@@ -117,15 +166,26 @@ class DQNAgent:
             if args.replay:
                 replay.append((state, action, reward, next_state, is_terminal))
                 states, actions, rewards, next_states, is_terminals = replay.sample(args.batch_size)
-                q_target = self.sess.run(self.q, feed_dict={self.state: next_states})
-                _, loss, summary = self.sess.run([train_op, self.loss, train_summary],
-                                                 feed_dict={self.state: states,
-                                                            self.action: actions,
-                                                            self.reward: rewards,
-                                                            self.is_terminal: is_terminals,
-                                                            self.q_target: q_target})
+                if args.double_q:
+                    _, loss, summary = self.sess.run([train_op, self.loss, train_summary],
+                                                     feed_dict={self.state: states,
+                                                                self.action: actions,
+                                                                self.reward: rewards,
+                                                                self.next_state: next_states,
+                                                                self.is_terminal: is_terminals})
+                else:
+                    q_target = self.sess.run(self.q, feed_dict={self.state: next_states})
+                    _, loss, summary = self.sess.run([train_op, self.loss, train_summary],
+                                                     feed_dict={self.state: states,
+                                                                self.action: actions,
+                                                                self.reward: rewards,
+                                                                self.is_terminal: is_terminals,
+                                                                self.q_target: q_target})
             else:
-                q_target = self.sess.run(self.q, feed_dict={self.state: [next_state]})
+                if args.double_q:
+                    q_target = self.sess.run(self.q_target, feed_dict={self.state: [next_state]})
+                else:
+                    q_target = self.sess.run(self.q, feed_dict={self.state: [next_state]})
                 _, loss, summary = self.sess.run([train_op, self.loss, train_summary],
                                                  feed_dict={self.state: [state],
                                                             self.action: [action],
@@ -135,20 +195,25 @@ class DQNAgent:
             i += 1
             writer.add_summary(summary, i)
             if is_terminal:
-                state = self.env.reset()
                 summary = self.sess.run(length_summary, feed_dict={episode_length: i - episode_start})
                 writer.add_summary(summary, i)
+                state = self.env.reset()
                 episode_start = i
             else:
                 state = next_state
             if i % args.steps_per_eval == 0:
-                rewards = self.evaluate(args.env_name, args.eval_episodes, args.final_epsilon)
+                rewards = self.evaluate(args.eval_episodes, args.final_epsilon)
                 summary = self.sess.run(reward_summary,
                                         feed_dict={avg_reward: rewards.mean()})
                 writer.add_summary(summary, i)
                 print('Step: %d   Average reward: %f   Loss: %f' % (i, rewards.mean(), loss))
+                np.set_printoptions(precision=10)
                 print('Q values:', self.sess.run(self.q, feed_dict={self.state: [state]}))
                 print('Rewards:', rewards)
+                state = self.env.reset()
+                episode_start = i
+            if args.double_q and i % args.steps_per_update == 0:
+                self.sess.run(self.update_q_target)
             if i % steps_per_save == 0:
                 saver.save(self.sess, save_path, global_step)
         saver.save(self.sess, save_path, global_step)

@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import argparse
 import os
 from dqn_agent import DQNAgent
@@ -34,5 +35,10 @@ if __name__ == '__main__':
     parser.add_argument('--memory_size', type=int, default=50000)
     parser.add_argument('--burn_in', type=int, default=10000)
     parser.add_argument('--batch_size', type=int, default=32)
+    parser.add_argument('--num_frames', type=int, default=4)
+    parser.add_argument('--width', type=int, default=84)
+    parser.add_argument('--height', type=int, default=84)
+    parser.add_argument('--double_q', action='store_true')
+    parser.add_argument('--steps_per_update', type=int, default=10000)
     args = parser.parse_args()
     main(args)

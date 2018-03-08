@@ -2,8 +2,8 @@ import gym
 import numpy as np
 
 
-class ReplayMemory():
-    def __init__(self, memory_size, burn_in, env_name, policy, epsilon):
+class ReplayMemory:
+    def __init__(self, memory_size):
 
         # The memory essentially stores transitions recorder from the agent
         # taking actions in the environment.
@@ -13,17 +13,6 @@ class ReplayMemory():
         # A simple (if not the most efficient) was to implement the memory is as a list of transitions.
         self.memory_size = memory_size
         self.memory = []
-        i = 0
-        env = gym.make(env_name)
-        while i < burn_in:
-            done = False
-            state = env.reset()
-            while not done and i < burn_in:
-                action = policy(state, epsilon)
-                next_state, reward, done, info = env.step(action)
-                self.memory.append((state, action, reward, next_state, done))
-                state = next_state
-                i += 1
         self.oldest = 0
 
     def sample(self, batch_size=32):
