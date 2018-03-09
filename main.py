@@ -42,7 +42,6 @@ if __name__ == '__main__':
     parser.add_argument('--steps_per_eval', type=int, default=10000)
     parser.add_argument('--eval_episodes', type=int, default=20)
     parser.add_argument('--steps_per_update', type=int, default=10000)
-    parser.add_argument('--steps_per_save', type=int, default=100000)
     parser.add_argument('--max_iter', type=int, default=1000000)
     args = parser.parse_args()
     main(args)

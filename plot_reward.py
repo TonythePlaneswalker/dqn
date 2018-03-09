@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-parser = argparse.ArgumentParser(description='Deep Q Network Argument Parser')
+parser = argparse.ArgumentParser()
 parser.add_argument('--env_name', type=str)
 parser.add_argument('--csv_file', type=str)
 parser.add_argument('--fig_path', type=str)

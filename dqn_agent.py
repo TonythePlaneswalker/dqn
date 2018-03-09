@@ -64,15 +64,14 @@ class DQNAgent:
             self.next_state = tf.placeholder(tf.float32, shape=self.state.get_shape(), name='next_state')
             self.q_target = model.get_model(self.next_state, self.env.action_space.n, scope='q_target')
             self.update_q_target = [tf.assign(w_target, w) for w_target, w in zip(
-                tf.trainable_variables(scope='q_target'),
-                tf.trainable_variables(scope='q_net'))]
+                                    tf.trainable_variables(scope='q_target'),
+                                    tf.trainable_variables(scope='q_net'))]
         else:
             self.q_target = tf.placeholder(tf.float32, shape=(None, self.env.action_space.n), name='q_target')
         self.action = tf.placeholder(tf.int32, shape=(None,), name='action')
         self.reward = tf.placeholder(tf.float32, shape=(None,), name='reward')
         self.is_terminal = tf.placeholder(tf.float32, shape=(None,), name='is_terminal')
         if args.env_name == 'MountainCar-v0':
-            print('here')
             target = self.reward + args.gamma * tf.reduce_max(self.q_target, axis=1) * \
                      tf.cast((tf.gather(self.state, 0, axis=1) < 0.5), tf.float32)
         else:
@@ -122,7 +121,6 @@ class DQNAgent:
         train_epsilon = tf.train.polynomial_decay(args.init_epsilon, global_step,
                                                   args.epsilon_decay_steps, args.final_epsilon)
 
-        writer = tf.summary.FileWriter(args.log_dir, self.sess.graph)
         loss_summary = tf.summary.scalar('loss', self.loss)
         lr_summary = tf.summary.scalar('learning_rate', learning_rate)
         epsilon_summary = tf.summary.scalar('epsilon', train_epsilon)
@@ -136,6 +134,9 @@ class DQNAgent:
         train_op = trainer.minimize(self.loss, global_step,
                                     var_list=tf.trainable_variables(scope='q_net'))
 
+        saver = tf.train.Saver(max_to_keep=10)
+        save_path = os.path.join(args.log_dir, 'checkpoints', 'model')
+        steps_per_save = args.max_iter // 9
         if args.restore:
             self.restore(args.checkpoint)
         else:
@@ -144,12 +145,7 @@ class DQNAgent:
                 delete_key = input('%s exists. Delete? [y (or enter)/N]' % args.log_dir)
                 if delete_key == 'y' or delete_key == "":
                     os.system('rm -rf %s/*' % args.log_dir)
-            else:
-                os.makedirs(args.log_dir)
-        saver = tf.train.Saver(max_to_keep=10)
-        save_path = os.path.join(args.log_dir, 'checkpoints', 'model')
-        saver.save(self.sess, save_path, global_step)
-        steps_per_save = args.max_iter // 9
+            saver.save(self.sess, save_path, global_step)
 
         if args.replay:
             replay = ReplayMemory(args.memory_size)
@@ -164,6 +160,7 @@ class DQNAgent:
                     state = next_state
                     i += 1
 
+        writer = tf.summary.FileWriter(args.log_dir, self.sess.graph)
         i = self.sess.run(global_step)
         episode_start = i
         state = self.env.reset()
@@ -174,32 +171,20 @@ class DQNAgent:
             if args.replay:
                 replay.append((state, action, reward, next_state, is_terminal))
                 states, actions, rewards, next_states, is_terminals = replay.sample(args.batch_size)
-                if args.double_q:
-                    _, loss, summary = self.sess.run([train_op, self.loss, train_summary],
-                                                     feed_dict={self.state: states,
-                                                                self.action: actions,
-                                                                self.reward: rewards,
-                                                                self.next_state: next_states,
-                                                                self.is_terminal: is_terminals})
-                else:
-                    q_target = self.sess.run(self.q, feed_dict={self.state: next_states})
-                    _, loss, summary = self.sess.run([train_op, self.loss, train_summary],
-                                                     feed_dict={self.state: states,
-                                                                self.action: actions,
-                                                                self.reward: rewards,
-                                                                self.is_terminal: is_terminals,
-                                                                self.q_target: q_target})
             else:
-                if args.double_q:
-                    q_target = self.sess.run(self.q_target, feed_dict={self.state: [next_state]})
-                else:
-                    q_target = self.sess.run(self.q, feed_dict={self.state: [next_state]})
-                _, loss, summary = self.sess.run([train_op, self.loss, train_summary],
-                                                 feed_dict={self.state: [state],
-                                                            self.action: [action],
-                                                            self.reward: [reward],
-                                                            self.is_terminal: [is_terminal],
-                                                            self.q_target: q_target})
+                states = [state]
+                actions = [action]
+                rewards = [reward]
+                next_states = [next_state]
+                is_terminals = [is_terminal]
+            if args.double_q:
+                feed_dict = {self.state: states, self.action: actions, self.reward: rewards,
+                             self.next_state: next_states, self.is_terminal: is_terminals}
+            else:
+                q_target = self.sess.run(self.q, feed_dict={self.state: next_states})
+                feed_dict = {self.state: states, self.action: actions, self.reward: rewards,
+                             self.is_terminal: is_terminals, self.q_target: q_target}
+            _, loss, summary = self.sess.run([train_op, self.loss, train_summary], feed_dict=feed_dict)
             i += 1
             writer.add_summary(summary, i)
             if is_terminal:
