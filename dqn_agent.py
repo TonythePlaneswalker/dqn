@@ -8,8 +8,8 @@ from replay_memory import ReplayMemory
 
 
 class AtariWrapper:
-    def __init__(self, env_name, num_frames, input_size):
-        self.env = gym.make(env_name)
+    def __init__(self, env, num_frames, input_size):
+        self.env = env
         self.action_space = self.env.action_space
         self.input_size = input_size
         self.num_frames = num_frames
@@ -45,13 +45,15 @@ class DQNAgent:
         # Create an instance of the network itself, as well as the memory.
         # Here is also a good place to set environmental parameters,
         # as well as training parameters - number of episodes / iterations, etc.
+        self.env = gym.make(args.env_name)
+        if args.record:
+            self.env = gym.wrappers.Monitor(self.env, args.video_dir, force=True)
         if args.env_name == 'SpaceInvaders-v0':
-            self.env = AtariWrapper(args.env_name, args.num_frames, (args.width, args.height))
+            self.env = AtariWrapper(self.env, args.num_frames, (args.width, args.height))
             self.state = tf.placeholder(tf.float32,
                                         shape=(None, args.width, args.height, args.num_frames),
                                         name='state')
         else:
-            self.env = gym.make(args.env_name)
             self.state = tf.placeholder(tf.float32,
                                         shape=(None,) + self.env.observation_space.shape,
                                         name='state')
@@ -69,12 +71,12 @@ class DQNAgent:
         self.action = tf.placeholder(tf.int32, shape=(None,), name='action')
         self.reward = tf.placeholder(tf.float32, shape=(None,), name='reward')
         self.is_terminal = tf.placeholder(tf.float32, shape=(None,), name='is_terminal')
-        # if args.env_name == 'MountainCar-v0':
-        #     print('here')
-        #     target = self.reward + args.gamma * tf.reduce_max(self.q_target, axis=1) * \
-        #              tf.cast((tf.gather(self.state, 0, axis=1) < 0.5), tf.float32)
-        # else:
-        target = self.reward + args.gamma * tf.reduce_max(self.q_target, axis=1) * (1 - self.is_terminal)
+        if args.env_name == 'MountainCar-v0':
+            print('here')
+            target = self.reward + args.gamma * tf.reduce_max(self.q_target, axis=1) * \
+                     tf.cast((tf.gather(self.state, 0, axis=1) < 0.5), tf.float32)
+        else:
+            target = self.reward + args.gamma * tf.reduce_max(self.q_target, axis=1) * (1 - self.is_terminal)
         self.loss = tf.reduce_mean((target - tf.diag_part(tf.gather(self.q, self.action, axis=1))) ** 2)
 
         config = tf.ConfigProto()
@@ -134,14 +136,20 @@ class DQNAgent:
         train_op = trainer.minimize(self.loss, global_step,
                                     var_list=tf.trainable_variables(scope='q_net'))
 
-        saver = tf.train.Saver()
         if args.restore:
-            saver.restore(self.sess, tf.train.latest_checkpoint(os.path.join(args.log_dir, 'checkpoints')))
+            self.restore(args.checkpoint)
         else:
             self.sess.run(tf.global_variables_initializer())
+            if os.path.exists(args.log_dir):
+                delete_key = input('%s exists. Delete? [y (or enter)/N]' % args.log_dir)
+                if delete_key == 'y' or delete_key == "":
+                    os.system('rm -rf %s/*' % args.log_dir)
+            else:
+                os.makedirs(args.log_dir)
+        saver = tf.train.Saver(max_to_keep=10)
         save_path = os.path.join(args.log_dir, 'checkpoints', 'model')
         saver.save(self.sess, save_path, global_step)
-        steps_per_save = args.max_iter // 3
+        steps_per_save = args.max_iter // 9
 
         if args.replay:
             replay = ReplayMemory(args.memory_size)
@@ -156,7 +164,7 @@ class DQNAgent:
                     state = next_state
                     i += 1
 
-        i = 0
+        i = self.sess.run(global_step)
         episode_start = i
         state = self.env.reset()
         while i < args.max_iter:
@@ -216,4 +224,7 @@ class DQNAgent:
                 self.sess.run(self.update_q_target)
             if i % steps_per_save == 0:
                 saver.save(self.sess, save_path, global_step)
-        saver.save(self.sess, save_path, global_step)
+
+    def restore(self, checkpoint):
+        saver = tf.train.Saver()
+        saver.restore(self.sess, checkpoint)
