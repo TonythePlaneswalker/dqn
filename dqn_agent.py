@@ -57,26 +57,26 @@ class DQNAgent:
             self.state = tf.placeholder(tf.float32,
                                         shape=(None,) + self.env.observation_space.shape,
                                         name='state')
+        self.next_state = tf.placeholder(tf.float32, shape=self.state.get_shape(), name='next_state')
 
         model = importlib.import_module(args.model_file)
-        self.q = model.get_model(self.state, self.env.action_space.n, scope='q_net')
-        if args.double_q:
-            self.next_state = tf.placeholder(tf.float32, shape=self.state.get_shape(), name='next_state')
-            self.q_target = model.get_model(self.next_state, self.env.action_space.n, scope='q_target')
-            self.update_q_target = [tf.assign(w_target, w) for w_target, w in zip(
-                                    tf.trainable_variables(scope='q_target'),
-                                    tf.trainable_variables(scope='q_net'))]
-        else:
-            self.q_target = tf.placeholder(tf.float32, shape=(None, self.env.action_space.n), name='q_target')
+        self.q_pred = model.get_model(self.state, self.env.action_space.n, scope='q_pred')
+        self.q_target = model.get_model(self.next_state, self.env.action_space.n, scope='q_target')
+        self.update_q_target = [tf.assign(w_target, w) for w_target, w in zip(
+                                tf.trainable_variables(scope='q_target'),
+                                tf.trainable_variables(scope='q_pred'))]
+
+        # Calculate target
         self.action = tf.placeholder(tf.int32, shape=(None,), name='action')
         self.reward = tf.placeholder(tf.float32, shape=(None,), name='reward')
         self.is_terminal = tf.placeholder(tf.float32, shape=(None,), name='is_terminal')
-        if args.env_name == 'MountainCar-v0':
-            target = self.reward + args.gamma * tf.reduce_max(self.q_target, axis=1) * \
-                     tf.cast((tf.gather(self.state, 0, axis=1) < 0.5), tf.float32)
+        self.q_next = tf.placeholder(tf.float32, shape=(None, self.env.action_space.n), name='q_next')
+        if args.double_q:
+            q_eval = tf.diag_part(tf.gather(self.q_target, tf.argmax(self.q_next, axis=1), axis=1))
         else:
-            target = self.reward + args.gamma * tf.reduce_max(self.q_target, axis=1) * (1 - self.is_terminal)
-        self.loss = tf.reduce_mean((target - tf.diag_part(tf.gather(self.q, self.action, axis=1))) ** 2)
+            q_eval = tf.reduce_max(self.q_target, axis=1)
+        target = self.reward + args.gamma * q_eval * (1 - self.is_terminal)
+        self.loss = tf.reduce_mean((target - tf.diag_part(tf.gather(self.q_pred, self.action, axis=1))) ** 2)
 
         config = tf.ConfigProto()
         config.gpu_options.allow_growth = True
@@ -98,7 +98,7 @@ class DQNAgent:
         return rewards
 
     def policy(self, state, epsilon):
-        q_values = self.sess.run(self.q, feed_dict={self.state: [state]})
+        q_values = self.sess.run(self.q_pred, feed_dict={self.state: [state]})
         best_action = np.argmax(q_values[0])
         u = np.random.rand()
         if u > epsilon:
@@ -132,7 +132,7 @@ class DQNAgent:
 
         trainer = tf.train.AdamOptimizer(learning_rate)
         train_op = trainer.minimize(self.loss, global_step,
-                                    var_list=tf.trainable_variables(scope='q_net'))
+                                    var_list=tf.trainable_variables(scope='q_pred'))
 
         saver = tf.train.Saver(max_to_keep=10)
         save_path = os.path.join(args.log_dir, 'checkpoints', 'model')
@@ -141,10 +141,12 @@ class DQNAgent:
             self.restore(args.checkpoint)
         else:
             self.sess.run(tf.global_variables_initializer())
+            self.sess.run(self.update_q_target)
             if os.path.exists(args.log_dir):
                 delete_key = input('%s exists. Delete? [y (or enter)/N]' % args.log_dir)
                 if delete_key == 'y' or delete_key == "":
                     os.system('rm -rf %s/*' % args.log_dir)
+            os.makedirs(os.path.join(args.log_dir, 'checkpoints'), exist_ok=True)
             saver.save(self.sess, save_path, global_step)
 
         if args.replay:
@@ -154,7 +156,7 @@ class DQNAgent:
                 done = False
                 state = self.env.reset()
                 while not done and i < args.burn_in:
-                    action = self.policy(state, args.init_epsilon)
+                    action = self.policy(state, self.sess.run(train_epsilon))
                     next_state, reward, done, info = self.env.step(action)
                     replay.append((state, action, reward, next_state, done))
                     state = next_state
@@ -178,12 +180,12 @@ class DQNAgent:
                 next_states = [next_state]
                 is_terminals = [is_terminal]
             if args.double_q:
+                q_next = self.sess.run(self.q_pred, feed_dict={self.state: next_states})
+                feed_dict = {self.state: states, self.action: actions, self.reward: rewards,
+                             self.next_state: next_states, self.is_terminal: is_terminals, self.q_next: q_next}
+            else:
                 feed_dict = {self.state: states, self.action: actions, self.reward: rewards,
                              self.next_state: next_states, self.is_terminal: is_terminals}
-            else:
-                q_target = self.sess.run(self.q, feed_dict={self.state: next_states})
-                feed_dict = {self.state: states, self.action: actions, self.reward: rewards,
-                             self.is_terminal: is_terminals, self.q_target: q_target}
             _, loss, summary = self.sess.run([train_op, self.loss, train_summary], feed_dict=feed_dict)
             i += 1
             writer.add_summary(summary, i)
@@ -201,7 +203,7 @@ class DQNAgent:
                 writer.add_summary(summary, i)
                 print('Step: %d   Average reward: %f   Loss: %f' % (i, rewards.mean(), loss))
                 np.set_printoptions(precision=10)
-                print('Q values:', self.sess.run(self.q, feed_dict={self.state: [state]}))
+                print('Q values:', self.sess.run(self.q_pred, feed_dict={self.state: [state]}))
                 print('Rewards:', rewards)
                 state = self.env.reset()
                 episode_start = i
