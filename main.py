@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import argparse
 from dqn_agent import DQNAgent
 
@@ -38,6 +37,7 @@ if __name__ == '__main__':
     parser.add_argument('--lr_decay_rate', type=float, default=0.5)
     parser.add_argument('--lr_decay_steps', type=int, default=200000)
     parser.add_argument('--lr_clip', type=float, default=0.000001)
+    parser.add_argument('--grad_clip', type=float)
     parser.add_argument('--init_epsilon', type=float, default=0.5)
     parser.add_argument('--final_epsilon', type=float, default=0.05)
     parser.add_argument('--epsilon_decay_steps', type=int, default=100000)

@@ -16,7 +16,7 @@ class ReplayMemory:
         i.e. state, action, reward, next state, terminal flag tuples.
         '''
         idx = np.random.choice(len(self.memory), batch_size)
-        return zip(*np.array(self.memory)[idx]), idx
+        return zip(*np.array(self.memory)[idx])
 
     def append(self, transition):
         '''Appends transition to the memory.'''

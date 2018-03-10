@@ -87,8 +87,11 @@ class DQNAgent:
         train_epsilon = tf.train.polynomial_decay(args.init_epsilon, global_step,
                                                   args.epsilon_decay_steps, args.final_epsilon)
         trainer = tf.train.AdamOptimizer(learning_rate)
-        train_op = trainer.minimize(self.loss, global_step,
-                                    var_list=tf.trainable_variables(scope='q_pred'))
+        grad = trainer.compute_gradients(self.loss, var_list=tf.trainable_variables(scope='q_pred'))
+        if args.grad_clip:
+            # Clip the gradients
+            grad = [(tf.clip_by_value(grad, -args.grad_clip, args.grad_clip), var) for grad, var in grad]
+        train_op = trainer.apply_gradients(grad, global_step)
 
         # Summary for tensorboard
         loss_summary = tf.summary.scalar('loss', self.loss)
