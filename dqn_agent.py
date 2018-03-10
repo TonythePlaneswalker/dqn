@@ -8,20 +8,9 @@ from replay_memory import ReplayMemory
 
 
 class DQNAgent:
-
-    # In this class, we will implement functions to do the following.
-    # (1) Create an instance of the Q Network class.
-    # (2) Create a function that constructs a policy from the Q values predicted by the Q Network.
-    #		(a) Epsilon Greedy Policy.
-    # 		(b) Greedy Policy.
-    # (3) Create a function to train the Q Network, by interacting with the environment.
-    # (4) Create a function to test the Q Network's performance on the environment.
-    # (5) Create a function for Experience Replay.
-
+    '''An agent that learns an epsilon-greedy policy using Q-learning.'''
     def __init__(self, args):
-        # Create an instance of the network itself, as well as the memory.
-        # Here is also a good place to set environmental parameters,
-        # as well as training parameters - number of episodes / iterations, etc.
+        # Set up environment and network input
         self.env = gym.make(args.env_name)
         if args.record:
             self.env = gym.wrappers.Monitor(self.env, args.video_dir, force=True)
@@ -36,9 +25,9 @@ class DQNAgent:
                                         name='state')
         self.next_state = tf.placeholder(tf.float32, shape=self.state.get_shape(), name='next_state')
 
+        # Build prediction and target networks
         model = importlib.import_module(args.model_file)
         self.q_pred = model.get_model(self.state, self.env.action_space.n, scope='q_pred')
-
         if args.fix_target:
             self.q_target = model.get_model(self.next_state, self.env.action_space.n, scope='q_target')
             self.update_q_target = [tf.assign(w_target, w) for w_target, w in zip(
@@ -47,7 +36,7 @@ class DQNAgent:
         else:
             self.q_target = tf.placeholder(tf.float32, shape=(None, self.env.action_space.n), name='q_target')
 
-        # Calculate target
+        # Calculate TD target
         self.action = tf.placeholder(tf.int32, shape=(None,), name='action')
         self.reward = tf.placeholder(tf.float32, shape=(None,), name='reward')
         self.is_terminal = tf.placeholder(tf.float32, shape=(None,), name='is_terminal')
@@ -59,6 +48,7 @@ class DQNAgent:
         target = self.reward + args.gamma * q_eval * (1 - self.is_terminal)
         self.loss = tf.reduce_mean((target - tf.diag_part(tf.gather(self.q_pred, self.action, axis=1))) ** 2)
 
+        # Set up session for training/testing
         config = tf.ConfigProto()
         config.gpu_options.allow_growth = True
         config.allow_soft_placement = True
@@ -88,12 +78,7 @@ class DQNAgent:
             return self.env.action_space.sample()
 
     def train(self, args):
-        # In this function, we will train our network.
-        # If training without experience replay_memory, then you will interact with the environment
-        # in this function, while also updating your network parameters.
-
-        # If you are using a replay memory, you should interact with environment here, and store these
-        # transitions to memory, while also updating your model.
+        # Set up training parameters and trainer
         global_step = tf.Variable(0, trainable=False, name='global_step')
         learning_rate = tf.train.exponential_decay(args.base_lr, global_step,
                                                    args.lr_decay_steps, args.lr_decay_rate,
@@ -101,7 +86,11 @@ class DQNAgent:
         learning_rate = tf.maximum(learning_rate, args.lr_clip)
         train_epsilon = tf.train.polynomial_decay(args.init_epsilon, global_step,
                                                   args.epsilon_decay_steps, args.final_epsilon)
+        trainer = tf.train.AdamOptimizer(learning_rate)
+        train_op = trainer.minimize(self.loss, global_step,
+                                    var_list=tf.trainable_variables(scope='q_pred'))
 
+        # Summary for tensorboard
         loss_summary = tf.summary.scalar('loss', self.loss)
         lr_summary = tf.summary.scalar('learning_rate', learning_rate)
         epsilon_summary = tf.summary.scalar('epsilon', train_epsilon)
@@ -111,10 +100,7 @@ class DQNAgent:
         avg_reward = tf.placeholder(tf.float32, shape=(), name='avg_reward')
         reward_summary = tf.summary.scalar('average reward', avg_reward)
 
-        trainer = tf.train.AdamOptimizer(learning_rate)
-        train_op = trainer.minimize(self.loss, global_step,
-                                    var_list=tf.trainable_variables(scope='q_pred'))
-
+        # Set up saving and logging
         saver = tf.train.Saver(max_to_keep=10)
         save_path = os.path.join(args.log_dir, 'checkpoints', 'model')
         steps_per_save = args.max_iter // 9
@@ -130,7 +116,9 @@ class DQNAgent:
                     os.system('rm -rf %s/*' % args.log_dir)
             os.makedirs(os.path.join(args.log_dir, 'checkpoints'), exist_ok=True)
             saver.save(self.sess, save_path, global_step)
+        writer = tf.summary.FileWriter(args.log_dir, self.sess.graph)
 
+        # Burn in some transitions using the randomly initialized agent into the replay memory
         if args.replay:
             replay = ReplayMemory(args.memory_size)
             epsilon = self.sess.run(train_epsilon)
@@ -145,7 +133,7 @@ class DQNAgent:
                     state = next_state
                     i += 1
 
-        writer = tf.summary.FileWriter(args.log_dir, self.sess.graph)
+        # Training
         i = self.sess.run(global_step)
         episode_start = i
         state = self.env.reset()
