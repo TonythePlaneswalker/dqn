@@ -55,6 +55,7 @@ class DQNAgent:
         self.sess = tf.Session(config=config)
 
     def evaluate(self, num_episodes, epsilon):
+        '''Evaluate the epsilon greedy policy for a number of episodes and return the rewards.'''
         rewards = np.zeros(num_episodes)
         for i in range(num_episodes):
             done = False
@@ -69,6 +70,10 @@ class DQNAgent:
         return rewards
 
     def policy(self, state, epsilon):
+        '''
+        Returns the action sampled from the epsilon greedy policy learned by the agent.
+        For a full greedy policy, set epsilon=0.
+        '''
         q_values = self.sess.run(self.q_pred, feed_dict={self.state: [state]})
         best_action = np.argmax(q_values[0])
         u = np.random.rand()
@@ -141,6 +146,7 @@ class DQNAgent:
         episode_start = i
         state = self.env.reset()
         while i < args.max_iter:
+            # Obtain experience
             epsilon = self.sess.run(train_epsilon)
             action = self.policy(state, epsilon)
             next_state, reward, is_terminal, info = self.env.step(action)
@@ -153,6 +159,8 @@ class DQNAgent:
                 rewards = [reward]
                 next_states = [next_state]
                 is_terminals = [is_terminal]
+
+            # Set up target and update
             if args.fix_target:
                 feed_dict = {self.state: states, self.action: actions, self.reward: rewards,
                              self.next_state: next_states, self.is_terminal: is_terminals}
@@ -164,6 +172,8 @@ class DQNAgent:
                 q_next = self.sess.run(self.q_pred, feed_dict={self.state: next_states})
                 feed_dict.update({self.q_next: q_next})
             _, loss, summary = self.sess.run([train_op, self.loss, train_summary], feed_dict=feed_dict)
+
+            # Logging
             i += 1
             writer.add_summary(summary, i)
             if is_terminal:
@@ -173,6 +183,8 @@ class DQNAgent:
                 state = self.env.reset()
             else:
                 state = next_state
+
+            # Evaluation
             if i % args.steps_per_eval == 0:
                 rewards = self.evaluate(args.eval_episodes, args.final_epsilon)
                 summary = self.sess.run(reward_summary,
@@ -184,8 +196,12 @@ class DQNAgent:
                 print('Rewards:', rewards)
                 episode_start = i
                 state = self.env.reset()
+
+            # Update target network
             if args.fix_target and i % args.steps_per_update == 0:
                 self.sess.run(self.update_q_target)
+
+            # Save model
             if i % steps_per_save == 0:
                 saver.save(self.sess, save_path, global_step)
 

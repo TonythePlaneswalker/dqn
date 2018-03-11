@@ -10,7 +10,7 @@ class ReplayMemory:
         self.memory = []
         self.oldest = 0
 
-    def sample(self, batch_size=32):
+    def sample(self, batch_size):
         '''
         Returns a batch of randomly sampled transitions -
         i.e. state, action, reward, next state, terminal flag tuples.
