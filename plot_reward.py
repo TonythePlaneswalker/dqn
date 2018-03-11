@@ -25,5 +25,7 @@ if args.env_name == 'CartPole-v0':
     plt.ylim([0, 220])
 elif args.env_name == 'MountainCar-v0':
     plt.ylim([-220, -100])
+elif args.env_name == 'SpaceInvaders-v0':
+    plt.ylim([0, 400])
 plt.xticks(np.arange(11) * 100000)
 plt.savefig(args.fig_path)
