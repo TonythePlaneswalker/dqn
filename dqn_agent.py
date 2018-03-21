@@ -83,7 +83,7 @@ class DQNAgent:
             return self.env.action_space.sample()
 
     def train(self, args):
-        # Set up training parameters and trainer
+        # Decaying learning rate and epsilon
         global_step = tf.Variable(0, trainable=False, name='global_step')
         learning_rate = tf.train.exponential_decay(args.base_lr, global_step,
                                                    args.lr_decay_steps, args.lr_decay_rate,
@@ -91,6 +91,8 @@ class DQNAgent:
         learning_rate = tf.maximum(learning_rate, args.lr_clip)
         train_epsilon = tf.train.polynomial_decay(args.init_epsilon, global_step,
                                                   args.epsilon_decay_steps, args.final_epsilon)
+
+        # Set up trainer
         trainer = tf.train.AdamOptimizer(learning_rate)
         grad = trainer.compute_gradients(self.loss, var_list=tf.trainable_variables(scope='q_pred'))
         if args.grad_clip:
@@ -160,7 +162,7 @@ class DQNAgent:
                 next_states = [next_state]
                 is_terminals = [is_terminal]
 
-            # Set up target and update
+            # Set up target and update prediction network
             if args.fix_target:
                 feed_dict = {self.state: states, self.action: actions, self.reward: rewards,
                              self.next_state: next_states, self.is_terminal: is_terminals}
@@ -176,6 +178,8 @@ class DQNAgent:
             # Logging
             i += 1
             writer.add_summary(summary, i)
+
+            # Checking for end of episode
             if is_terminal:
                 summary = self.sess.run(length_summary, feed_dict={episode_length: i - episode_start})
                 writer.add_summary(summary, i)

@@ -19,6 +19,7 @@ class AtariWrapper:
 
     def step(self, action):
         state, reward, done, info = self.env.step(action)
+        # Keep the most recent frames
         self.frames = self.frames[1:] + [self.process_frame(state)]
         next_state = np.stack(self.frames, axis=2)
         return next_state, reward, done, info
@@ -26,10 +27,12 @@ class AtariWrapper:
     def reset(self):
         state = self.env.reset()
         self.frames = [self.process_frame(state)]
+        # For the first num_frames-1 steps, random actions are taken
         for j in range(self.num_frames - 1):
             state, reward, done, info = self.env.step(self.env.action_space.sample())
             self.frames += [self.process_frame(state)]
         return np.stack(self.frames, axis=2)
 
     def process_frame(self, frame):
+        # Convert to int8 to save memory
         return (color.rgb2gray(transform.resize(frame, self.size)) * 255).astype(np.uint8)

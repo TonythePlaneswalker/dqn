@@ -1,6 +1,6 @@
 # 10-703 Assignment 2
 To train a model, run
-```python
+```bash
 python3 main.py --env [environment_name] --model [model_name] --log [log_directory]
 ```
 The available models are `linear`, `dqn`, `dueling` and `dueling_conv`.
@@ -8,11 +8,11 @@ The available models are `linear`, `dqn`, `dueling` and `dueling_conv`.
 Use `--replay` to turn on experience replay.
 
 To test a model, run
-```python
+```bash
 python3 main.py --test --env [environment_name] --checkpoint [saved_checkpoint_path]
 ```
 
 For other options and hyperparameters, run
-```python
+```bash
 python3 main.py --help
 ```
