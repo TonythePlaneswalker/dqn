@@ -1,4 +1,4 @@
-# 10-703 Assignment 2
+# Deep Q-Network with Experience Replay
 To train a model, run
 ```python
 python3 main.py --env [environment_name] --model [model_name] --log [log_directory]
